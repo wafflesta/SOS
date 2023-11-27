@@ -10,36 +10,63 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-Step 1. Install and/or load packages
+Step 1. Install / load packages
 ```{r}
-# Install and/or load required packages
-install.packages("purrr")
+# Install and load required packages
+#install.packages("purrr")
 library(purrr)
-
 ```
 
-Step 2. Read each .txt file into R as a df 
-Ensure .Rmd file and all .txt files are in the same working directory
+Step 2. Read each .txt file into R as a data frame 
+Ensure .Rmd file and all timepoint.txt files are in the same working directory
 ```{r}
 
-# List all .txt files in the directory
+# List all timepoint.txt files in the directory
 txt_files <- list.files(pattern = ".txt", full.names = FALSE)
+
+# Empty list of data frame names
+list_df_names <- list()
 
 # Function to read a .txt file and return as a data frame
 read_and_number_df <- function(file_path) {
-  # Read the file into a data frame and assign col names
-  df <- read.table(file_path, sep = ",", header = FALSE, col.names = c("x_pos", "y_pos", "Frame_number", "Molecule_ID"))
+  # Read the file into a data frame
+  df <- read.table(file_path, sep = ",", header = FALSE, col.names = c("x_pixel", "y_pixel", "Frame_number", "Molecule_ID"))
 
   # Extract the file name
   file_name <- sub(pattern = ".txt", "", basename(file_path))
   
   # Assign file name to the data frame
   assign(paste0(file_name), df, envir = .GlobalEnv)
-
+  
+  # Append data frame name to list_df_names
+  list_df_names <<- append(list_df_names, toString(file_name))
 }
 
 # Use purrr::walk to apply the function to each file in the txt_files list
 walk(txt_files, read_and_number_df)
+
+
+```
+
+Step 3. Calculate x and y physical lengths for each molecule 
+
+```{r}
+# Function to calculate x and y physical length from pixels for each molecule 
+calc_phys_length <- function(df_name) {
+  # Retrieve the data frame
+  df <- get(df_name)
+  
+  # Calculate physical lengths and create a new column "x_pos" and "y_pos"
+  df$x_pos <- df$x_pixel * 0.107
+  df$y_pos <- df$y_pixel * 0.107
+  
+  # Assign the modified data frame back
+  assign(df_name, df, envir = .GlobalEnv)
+}
+
+# Use purrr::walk to apply the function to each file in the data frame list
+walk(list_df_names, calc_phys_length)
+
 
 
 ```

@@ -1,0 +1,48 @@
+---
+title: "SOS"
+author: "ST"
+date: "2023-11-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Install / load packages
+```{r}
+# Install and load required packages
+install.packages(c("purrr", "readr", "tidyverse"))
+library(purrr)
+library(readr)
+library(tidyverse)
+library(readr)
+```
+
+1. Read each .txt file into R as a df 
+Ensure .Rmd file and all .txt files are in the same working directory
+```{r}
+
+# List all .txt files in the directory
+txt_files <- list.files(pattern = ".txt", full.names = FALSE)
+
+# Function to read a .txt file and return as a data frame
+read_and_number_df <- function(file_path) {
+  # Read the file into a data frame
+  df <- read.table(file_path, sep = ",", header = FALSE, col.names = c("x_pos", "y_pos", "Frame_number", "Molecule_ID"))
+
+  # Extract the file name
+  file_name <- sub(pattern = ".txt", "", basename(file_path))
+  
+  # Assign a unique name to the data frame
+  assign(paste0("df_", file_name), df, envir = .GlobalEnv)
+
+}
+
+# Use purrr::walk to apply the function to each file in the txt_files list
+walk(txt_files, read_and_number_df)
+
+
+```
+

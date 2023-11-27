@@ -36,7 +36,7 @@ read_and_number_df <- function(file_path) {
   file_name <- sub(pattern = ".txt", "", basename(file_path))
   
   # Assign a unique name to the data frame
-  assign(paste0("df_", file_name), df, envir = .GlobalEnv)
+  assign(paste0(file_name), df, envir = .GlobalEnv)
 
 }
 

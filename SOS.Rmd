@@ -97,10 +97,11 @@ walk(list_df_names, filter_data)
 
 ```
 
-# Step 5. Check for consecutive frames for each molecule_ID to calculate the coefficients
+Step 5. Check for consecutive frames for each molecule_ID to calculate the coefficients
 
 ```{r} 
 
+# Function to check for consecutive frames for each molecule_ID to calculate the coefficients
 check_frame <- function(timepoints) {
   result <- timepoints %>%
     group_by(Molecule_ID) %>%
@@ -110,29 +111,28 @@ check_frame <- function(timepoints) {
       all(diff(Frame_number) == 1) &
       sum(diff(Frame_number) != 1) <= 1
     ) %>%
-
+    
     ungroup()
-
+  
   return(result)
 }
 
-#Return the results to the dataframe
-check_frame <- function(df_name) {
 
-# Retrieve data frame
+#Return the results to the dataframe
+frame_to_df <- function(df_name) {
+  # Retrieve data frame
   df <- get(df_name)
- 
   # Apply the function to our data
   df_filtered <- check_frame(df)
+  # Assign the filtered data frame back to the environment
+  assign(df_name, df_filtered, envir = .GlobalEnv)
 
-   # Assign the filtered data frame back to the environment
- assign(df_name, df_filtered, envir = .GlobalEnv)
 }
 
-
-# Use walk to apply the function to each data frame in the list
-walk(list_df_names, filter_consecutive_frames)
  
+# Use walk to apply the function to each data frame in the list
+walk(list_df_names, frame_to_df)
+
 
 ```
 

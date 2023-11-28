@@ -97,6 +97,45 @@ walk(list_df_names, filter_data)
 
 ```
 
+# Step 5. Check for consecutive frames for each molecule_ID to calculate the coefficients
+
+```{r} 
+
+check_frame <- function(timepoints) {
+  result <- timepoints %>%
+    group_by(Molecule_ID) %>%
+    arrange(Frame_number) %>%
+    filter(
+      row_number() <= 5 &
+      all(diff(Frame_number) == 1) &
+      sum(diff(Frame_number) != 1) <= 1
+    ) %>%
+
+    ungroup()
+
+  return(result)
+}
+
+#Return the results to the dataframe
+check_frame <- function(df_name) {
+
+# Retrieve data frame
+  df <- get(df_name)
+ 
+  # Apply the function to our data
+  df_filtered <- check_frame(df)
+
+   # Assign the filtered data frame back to the environment
+ assign(df_name, df_filtered, envir = .GlobalEnv)
+}
+
+
+# Use walk to apply the function to each data frame in the list
+walk(list_df_names, filter_consecutive_frames)
+ 
+
+```
+
 Step 6. Calculate mean squared difference (MSD) and diffusion coefficient (D)
 
 ```{r}

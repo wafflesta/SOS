@@ -71,3 +71,44 @@ walk(list_df_names, calc_phys_length)
 
 ```
 
+Filter cases where Molecule_ID frequency is <= 4 
+
+```{r}
+
+
+#Function to filter the frequencies of Molecule_ID with 4 or less records.
+
+filter_data <- function(timepoints) {
+
+  # Retrieve data frame
+
+  df <- get(timepoints)
+
+ 
+
+  # Convert the Molecule ID column to factor (categorical variable)
+
+  df$Molecule_ID <- as.factor(df$Molecule_ID)
+
+ 
+
+  # Filter to only include molecule IDs with 5 or more records.
+
+  df <- df %>%
+
+    group_by(Molecule_ID) %>%
+
+    filter(n() >= 5)
+
+ 
+
+  # Return modified data frame back
+
+  assign(timepoints, df, envir = .GlobalEnv)
+
+}
+
+
+walk(list_df_names, filter_data)
+
+```

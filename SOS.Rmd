@@ -159,5 +159,15 @@ walk(list_df_names, calc_MSD_D)
 timepoint_dictionary <- c("01"="0", "02"="5", "03"="10", "04"="16", "05"="22", 
   "06"="29", "07"="34", "08"="40", "09"="45", "10"="49", "11"="54", "12"="61", 
   "13"="67", "14"="74", "15"="80", "16"="87", "17"="94", "18"="101")
+```
+
+Plot Histogram
+
+```{r}
+library(ggplot2)
+
+# Plot histogram
+
+ggplot(timepoint_01_calculations,aes(x=D)) + geom_histogram(bins = 20) + labs(x = bquote('Diffusion Coefficient (D)' ~ (μm^2/s)), y = "Frequency", title = "LexA Movement After Antibiotic Treatment, t = 0 min") + theme_minimal()
 
 ```

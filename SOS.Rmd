@@ -1,6 +1,6 @@
 ---
 title: "SOS"
-author: "ST"
+author: "ST, YL, EH, AH"
 date: "2023-11-26"
 output: html_document
 ---
@@ -9,16 +9,18 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
 Step 1. Install / load packages
+
 ```{r}
 # Install and load required packages
-#install.packages("purrr")
 library(purrr)
+library(dplyr)
+library(ggplot2)
 ```
 
 Step 2. Read each .txt file into R as a data frame 
 Ensure .Rmd file and all timepoint.txt files are in the same working directory
+
 ```{r}
 
 # List all timepoint.txt files in the directory
@@ -45,63 +47,62 @@ read_and_number_df <- function(file_path) {
 # Use purrr::walk to apply the function to each file in the txt_files list
 walk(txt_files, read_and_number_df)
 
-
 ```
 
 Step 3. Calculate x and y physical lengths for each molecule 
 
 ```{r}
+
 # Function to calculate x and y physical length from pixels for each molecule 
-calc_phys_length <- function(df_name) {
+calc_phys_length <- function(timepoints) {
   # Retrieve the data frame
-  df <- get(df_name)
+  df <- get(timepoints)
   
   # Calculate physical lengths and create a new column "x_pos" and "y_pos"
+  # Conversion rate between pixel and physical is 0.107μm (pixel)^(-1)
   df$x_pos <- df$x_pixel * 0.107
   df$y_pos <- df$y_pixel * 0.107
   
   # Assign the modified data frame back
-  assign(df_name, df, envir = .GlobalEnv)
+  assign(timepoints, df, envir = .GlobalEnv)
 }
 
-# Use purrr::walk to apply the function to each file in the data frame list
+# Use purr::walk to apply the function to each data frame in the list
 walk(list_df_names, calc_phys_length)
-
-
 
 ```
 
-Step 4. Filter cases where Molecule_ID frequency is <= 4 
+Step 4. Filter out cases where Molecule_ID frequency is <= 4
 
 ```{r}
 
-#Function to filter the frequencies of Molecule_ID with 4 or less records.
+# Function to filter out the frequencies of Molecule_ID with 4 or less records
 filter_data <- function(timepoints) {
+  
   # Retrieve data frame
   df <- get(timepoints)
-
+  
   # Convert the Molecule ID column to factor (categorical variable)
   df$Molecule_ID <- as.factor(df$Molecule_ID)
-
-  # Filter to only include molecule IDs with 5 or more records.
-  df <- df %>%
-    group_by(Molecule_ID) %>%
-    filter(n() >= 5)
-
+  
+  # Filter to only include molecule IDs with 5 or more records
+  df <- df %>% group_by(Molecule_ID) %>% 
+    filter(n() >= 5) 
+  
   # Return modified data frame back
   assign(timepoints, df, envir = .GlobalEnv)
 }
 
-
+# Use purr::walk to apply the function to each data frame in the list
 walk(list_df_names, filter_data)
 
 ```
 
-Step 5. Check for consecutive frames for each molecule_ID to calculate the coefficients
+Step 5. Check for consecutive frames for each Molecule_ID
 
 ```{r} 
 
-# Function to check for consecutive frames for each molecule_ID to calculate the coefficients
+# Function to check for consecutive frames for each Molecule_ID 
 check_frame <- function(timepoints) {
   result <- timepoints %>%
     group_by(Molecule_ID) %>%
@@ -111,102 +112,135 @@ check_frame <- function(timepoints) {
       all(diff(Frame_number) == 1) &
       sum(diff(Frame_number) != 1) <= 1
     ) %>%
-    
     ungroup()
   
   return(result)
 }
 
-
-#Return the results to the dataframe
+# Return the results to the data frame
 frame_to_df <- function(df_name) {
   # Retrieve data frame
   df <- get(df_name)
+  
   # Apply the function to our data
   df_filtered <- check_frame(df)
+  
   # Assign the filtered data frame back to the environment
   assign(df_name, df_filtered, envir = .GlobalEnv)
-
 }
-
  
-# Use walk to apply the function to each data frame in the list
+# Use purr::walk to apply the function to each data frame in the list
 walk(list_df_names, frame_to_df)
-
 
 ```
 
 Step 6. Calculate mean squared difference (MSD) and diffusion coefficient (D)
 
 ```{r}
+
 # Function to Calculate mean squared difference (MSD) and diffusion coefficient (D)
 calc_MSD_D <- function(timepoints){
   # Retrieve the data frame
   df <- get(timepoints)
   
-  # Create new dataframe
+  # Create new data frame
+  df_new <- data.frame(matrix(ncol = 3, nrow = 0))
+  
+  # Assign name to new data frame based on old data frame
   df_new_name <- paste0(timepoints, "_calculations")
-  df_new <- setNames(data.frame(matrix(ncol = 3, nrow = 0)), c("Track_ID", "MSD", "D"))
 
-  # List of unique IDs in data frame
-  Track_ID <- unique(df$Molecule_ID)
-
-  # Loop through list of all unique IDs and calculate MSD and D
-  for (x in 1:length(Track_ID)){
-    # Create subset of all tracks for a given ID
-    dummy_df <- subset(df, Molecule_ID == Track_ID[x])
+  # Convert the Molecule ID column to factor (categorical variable)
+  df$Molecule_ID <- as.factor(df$Molecule_ID)
+   
+  N = 5     # Number of frames
+  dT = 0.00748 # delta time (s)
   
-    # Calculate MSD in μm^2
-    # MSD = 1/(N-1) ∑(x_{i+1} – x_i)**2 + (y_{i+1} – yi)**2
-  
-    N = 5     # Number of tracks
-    MSD = 0   # Reset MSD
-    sum_SD = 0  #Reset sum_SD
-  
-    # index no. 5 = x_pos;  index no. 6 = y_pos
-    # Loop through dummy_df and calculate the sum of squared difference
-    for (i in 1:(N-1)){
-      sum_SD <- sum_SD + (dummy_df[i+1,5] - dummy_df[i,5])**2 + 
-        (dummy_df[i+1,6] - dummy_df[i,6])**2
-    }
-
-  # Mean squared difference = sum_SD / N-1
-  MSD <- sum_SD/(N-1)
-  
-  # Calculate D in μm^2/s
-  dT = 0.00748
-  D <- MSD /((N-1)*dT)
-  
-  # Add a new row to the new data frame for MSD and D
-  df_new[nrow(df_new) + 1,] = c(Track_ID[x], MSD, D)
-  }
-  
+  # Filter by molecule ID and calculate MSD and D 
+  df_new <- df %>% group_by(Molecule_ID) %>% 
+    summarize(MSD = (1/4)*sum((lead(x_pos, default = last(x_pos)) - x_pos)^2 +
+    (lead(y_pos, default = last(y_pos)) - y_pos)^2)) %>% 
+    mutate(D = MSD/(4*dT))
+ 
   # Return new data frame back to global environment
   assign(df_new_name, df_new, envir = .GlobalEnv)
   
   #Print progress 
   cat("Finished for", timepoints, "\n")
-}
+}    
 
-# Use purrr::walk to apply the function to each file in the data frame list
+# Use purr::walk to apply the function to each data frame in the list
 walk(list_df_names, calc_MSD_D)
 
 ```
+Step 7. Generate a dictionary for each timepoint and antibiotic treatment time. 
+        Create a new list of data frames with calculated D.
 
 ```{r}
-# Dictionary for timepoint and corresponding minutes after antibiotic treatment
+
+# Dictionary for each timepoint and corresponding minutes after antibiotic treatment
 timepoint_dictionary <- c("01"="0", "02"="5", "03"="10", "04"="16", "05"="22", 
   "06"="29", "07"="34", "08"="40", "09"="45", "10"="49", "11"="54", "12"="61", 
   "13"="67", "14"="74", "15"="80", "16"="87", "17"="94", "18"="101")
+
+# List of data frames with calculated diffusion coefficients
+list_timepoint_calc <- c('timepoint_01_calculations', 'timepoint_02_calculations', 'timepoint_03_calculations', 'timepoint_04_calculations', 'timepoint_05_calculations', 'timepoint_06_calculations', 'timepoint_07_calculations', 'timepoint_08_calculations', 'timepoint_09_calculations', 'timepoint_10_calculations', 'timepoint_11_calculations', 'timepoint_12_calculations', 'timepoint_13_calculations', 'timepoint_14_calculations', 'timepoint_15_calculations', 'timepoint_16_calculations', 'timepoint_17_calculations', 'timepoint_18_calculations')
+
 ```
 
-Plot Histogram
+Step 8. Determine the state of each LexA molecule based on D 
 
 ```{r}
-library(ggplot2)
 
-# Plot histogram
+# Function to determine LexA state based on D
+LexA_state <- function(timepoints){
+  # Retrieve the data frame
+  df <- get(timepoints)
 
-ggplot(timepoint_01_calculations,aes(x=D)) + geom_histogram(bins = 20) + labs(x = bquote('Diffusion Coefficient (D)' ~ (μm^2/s)), y = "Frequency", title = "LexA Movement After Antibiotic Treatment, t = 0 min") + theme_minimal()
+  # Determine LexA state
+  df <- df %>% 
+    mutate(state = case_when(D < 0.2 ~ 'Bound',
+                           D < 2.0 ~ 'Free',
+                           D > 2.0 ~ 'Degraded'))
+  
+  # Return modified data frame back
+  assign(timepoints, df, envir = .GlobalEnv)
+}
+
+# Use purr::walk to apply the function to each data frame in the list
+walk(list_timepoint_calc, LexA_state)
+
+```
+
+Step 9. Generate histogram plots for each timepoint
+
+```{r}
+
+# Empty list for plots
+list_hist <- list()
+
+# Iterate through list_timepoint_calc and generate plots
+for (x in 1:length(list_timepoint_calc)){
+  time <- timepoint_dictionary[as.numeric(gsub("\\D", "", list_timepoint_calc[x]))]
+  
+  # Generate histogram title
+  title <- paste("LexA Movement After Antibiotic Treatment, t =", time, "min \n")
+  
+  #Get data frame
+  df <- (get(list_timepoint_calc[x]))
+  
+  # Plot histogram
+  hist <- ggplot(df, aes(x=D)) + geom_histogram(binwidth = 1, aes(y=..count../sum(..count..))) + 
+    ylim(0,.25) + 
+    labs(x = bquote('Diffusion Coefficient (D)' ~ (μm^2/s)), y = "Proportion", title = title) + 
+    theme_minimal()
+  
+  # Store histogram in list_hist
+  list_hist[[length(list_hist) + 1]] <- hist
+}
+
+# Show all plots
+for (plot in list_hist) {
+  print(plot)
+}
 
 ```

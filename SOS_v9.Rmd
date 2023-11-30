@@ -1,0 +1,561 @@
+---
+title: "SOS"
+author: "ST, YL, EH, AH"
+date: "2023-11-26"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Step 1. Install / load packages
+
+```{r message = FALSE, warning=FALSE}
+# Install and load required packages
+library(purrr)
+library(dplyr)
+library(ggplot2)
+library(ggfortify)
+```
+
+## Step 2. Read each .txt file into R as a data frame 
+
+Ensure .Rmd file and all timepoint.txt files are in the same working directory
+
+```{r warning=FALSE}
+
+# List all timepoint.txt files in the directory
+txt_files <- list.files(pattern = ".txt", full.names = FALSE)
+
+# Empty list of data frame names
+list_df_names <- list()
+
+# Function to read a .txt file and return as a data frame
+read_and_number_df <- function(file_path) {
+  # Read the file into a data frame
+  df <- read.table(file_path, sep = ",", header = FALSE, col.names = c("x_pixel", "y_pixel", "Frame_number", "Molecule_ID"))
+
+  # Extract the file name
+  file_name <- sub(pattern = ".txt", "", basename(file_path))
+  
+  # Assign file name to the data frame
+  assign(paste0(file_name), df, envir = .GlobalEnv)
+  
+  # Append data frame name to list_df_names
+  list_df_names <<- append(list_df_names, toString(file_name))
+}
+
+# Use purrr::walk to apply the function to each file in the txt_files list
+walk(txt_files, read_and_number_df)
+
+```
+
+## Step 3. Calculate x and y physical lengths for each molecule 
+
+```{r warning=FALSE}
+
+# Function to calculate x and y physical length from pixels for each molecule 
+calc_phys_length <- function(timepoints) {
+  # Retrieve the data frame
+  df <- get(timepoints)
+  
+  # Calculate physical lengths and create a new column "x_pos" and "y_pos"
+  # Conversion rate between pixel and physical is 0.107μm (pixel)^(-1)
+  df$x_pos <- df$x_pixel * 0.107
+  df$y_pos <- df$y_pixel * 0.107
+  
+  # Assign the modified data frame back
+  assign(timepoints, df, envir = .GlobalEnv)
+}
+
+# Use purr::walk to apply the function to each data frame in the list
+walk(list_df_names, calc_phys_length)
+
+```
+
+## Step 4. Filter out cases where Molecule_ID frequency is <= 4
+
+```{r warning=FALSE}
+
+# Function to filter out the frequencies of Molecule_ID with 4 or less records
+filter_data <- function(timepoints) {
+  
+  # Retrieve data frame
+  df <- get(timepoints)
+  
+  # Convert the Molecule ID column to factor (categorical variable)
+  df$Molecule_ID <- as.factor(df$Molecule_ID)
+  
+  # Filter to only include molecule IDs with 5 or more records
+  df <- df %>% group_by(Molecule_ID) %>% 
+    filter(n() >= 5) 
+  
+  # Return modified data frame back
+  assign(timepoints, df, envir = .GlobalEnv)
+}
+
+# Use purr::walk to apply the function to each data frame in the list
+walk(list_df_names, filter_data)
+
+```
+
+## Step 5. Check for consecutive frames for each Molecule_ID
+
+```{r warning=FALSE} 
+
+# Function to check for consecutive frames for each Molecule_ID 
+check_frame <- function(timepoints) {
+  result <- timepoints %>%
+    group_by(Molecule_ID) %>%
+    arrange(Frame_number) %>%
+    filter(
+      row_number() <= 5 &
+      all(diff(Frame_number) == 1) &
+      sum(diff(Frame_number) != 1) <= 1
+    ) %>%
+    ungroup()
+  
+  return(result)
+}
+
+# Return the results to the data frame
+frame_to_df <- function(df_name) {
+  # Retrieve data frame
+  df <- get(df_name)
+  
+  # Apply the function to our data
+  df_filtered <- check_frame(df)
+  
+  # Assign the filtered data frame back to the environment
+  assign(df_name, df_filtered, envir = .GlobalEnv)
+}
+ 
+# Use purr::walk to apply the function to each data frame in the list
+walk(list_df_names, frame_to_df)
+
+```
+
+## Step 6. Calculate mean squared difference (MSD) and diffusion coefficient (D)
+
+```{r warning=FALSE}
+
+# Function to Calculate mean squared difference (MSD) and diffusion coefficient (D)
+calc_MSD_D <- function(timepoints){
+  # Retrieve the data frame
+  df <- get(timepoints)
+  
+  # Create new data frame
+  df_new <- data.frame(matrix(ncol = 3, nrow = 0))
+  
+  # Assign name to new data frame based on old data frame
+  df_new_name <- paste0(timepoints, "_calculations")
+
+  # Convert the Molecule ID column to factor (categorical variable)
+  df$Molecule_ID <- as.factor(df$Molecule_ID)
+   
+  N = 5     # Number of frames
+  dT = 0.00748 # delta time (s)
+  
+  # Filter by molecule ID and calculate MSD and D 
+  df_new <- df %>% group_by(Molecule_ID) %>% 
+    summarize(MSD = (1/4)*sum((lead(x_pos, default = last(x_pos)) - x_pos)^2 +
+    (lead(y_pos, default = last(y_pos)) - y_pos)^2)) %>% 
+    mutate(D = MSD/(4*dT))
+ 
+  # Return new data frame back to global environment
+  assign(df_new_name, df_new, envir = .GlobalEnv)
+  
+  #Print progress 
+  cat("Finished for", timepoints, "\n")
+}    
+
+# Use purr::walk to apply the function to each data frame in the list
+walk(list_df_names, calc_MSD_D)
+
+```
+## Step 7. Generate a dictionary for each timepoint and antibiotic treatment time. 
+
+Create a new list of data frames with calculated D.
+
+```{r warning=FALSE}
+
+# Dictionary for each timepoint and corresponding minutes after antibiotic treatment
+timepoint_dictionary <- c("01"="0", "02"="5", "03"="10", "04"="16", "05"="22", 
+  "06"="29", "07"="34", "08"="40", "09"="45", "10"="49", "11"="54", "12"="61", 
+  "13"="67", "14"="74", "15"="80", "16"="87", "17"="94", "18"="101")
+
+# List of data frames with calculated diffusion coefficients
+list_timepoint_calc <- c('timepoint_01_calculations', 'timepoint_02_calculations', 'timepoint_03_calculations', 'timepoint_04_calculations', 'timepoint_05_calculations', 'timepoint_06_calculations', 'timepoint_07_calculations', 'timepoint_08_calculations', 'timepoint_09_calculations', 'timepoint_10_calculations', 'timepoint_11_calculations', 'timepoint_12_calculations', 'timepoint_13_calculations', 'timepoint_14_calculations', 'timepoint_15_calculations', 'timepoint_16_calculations', 'timepoint_17_calculations', 'timepoint_18_calculations')
+
+```
+
+## Step 8. Determine the state of each LexA molecule based on D 
+
+```{r warning=FALSE}
+
+# Function to determine LexA state based on D
+LexA_state <- function(timepoints){
+  # Retrieve the data frame
+  df <- get(timepoints)
+
+  # Determine LexA state
+  df <- df %>% 
+    mutate(state = case_when(D < 0.2 ~ 'Bound',
+                           D < 2.0 ~ 'Free',
+                           D > 2.0 ~ 'Degraded'))
+  
+  # Return modified data frame back
+  assign(timepoints, df, envir = .GlobalEnv)
+}
+
+# Use purr::walk to apply the function to each data frame in the list
+walk(list_timepoint_calc, LexA_state)
+
+```
+
+## Step 9. Generate histogram plots for each timepoint
+
+```{r warning=FALSE}
+
+# Empty list for plots
+list_hist <- list()
+
+# Iterate through list_timepoint_calc and generate plots
+for (x in 1:length(list_timepoint_calc)){
+  time <- timepoint_dictionary[as.numeric(gsub("\\D", "", list_timepoint_calc[x]))]
+  
+  # Generate histogram title
+  title <- paste("Distribution of LexA Diffusion, t =", time, "min \n")
+  
+  #Get data frame
+  df <- (get(list_timepoint_calc[x]))
+  
+  # Plot histogram
+  hist <- ggplot(df, aes(x=D)) + geom_histogram(binwidth = .4, fill = "darkgrey", aes(y=..count../sum(..count..))) + 
+    ylim(0,.1) + xlim(0,15) +
+    labs(x = bquote('Diffusion Coefficient (D)' ~ (μm^2/s)), y = "Proportion", title = title) + 
+    theme_classic(base_size = 15) + theme(plot.title = element_text(hjust = 0.5))
+  
+  # Store histogram in list_hist
+  list_hist[[length(list_hist) + 1]] <- hist
+  
+  # Save all histograms as .png to working directory
+  file_name <- paste("Distribution", time, "min.png")
+  ggsave(file_name, height = 7, width = 8)
+}
+
+# Show all plots
+for (plot in list_hist) {
+  print(plot)
+}
+
+```
+
+## Step 10. Obtain the descriptive stats of all the timepoints
+
+```{r warning=FALSE}
+
+library(pastecs)
+
+list_df_calculations <- list(timepoint_01_calculations,timepoint_02_calculations,timepoint_03_calculations, timepoint_04_calculations, timepoint_05_calculations, timepoint_06_calculations, timepoint_07_calculations, timepoint_08_calculations, timepoint_09_calculations, timepoint_10_calculations, timepoint_11_calculations, timepoint_12_calculations, timepoint_13_calculations, timepoint_14_calculations, timepoint_15_calculations, timepoint_16_calculations, timepoint_17_calculations, timepoint_18_calculations)
+
+# Function to calculate descriptive statistics for each data frame
+calculate_stats <- function(df) {
+  return(stat.desc(df[,2:3]))
+}
+ 
+# Use purrr::map to apply the function to each data frame in the list
+stats_list <- purrr::map(list_df_calculations, calculate_stats)
+
+# Print the results
+print(stats_list)
+
+View(stats_list)
+
+```
+
+## Step 11. Plot mean D against time
+
+```{r warning=FALSE}
+# Create data frame of mean and CI of D
+D_stats <- setNames(data.frame(matrix(ncol = 4, nrow = 18)), c("Time (min)", "Mean D", "Upper D", "Lower D"))
+
+# Loop through stats_list and populate D_stats 
+for (i in 1:length(stats_list)){
+  # Get time from dictionary
+  time <- as.numeric(timepoint_dictionary[i])
+  
+  # Get mean value of D
+  mean <- stats_list[[i]][[9,2]]
+
+  # Get CI of D
+  upper <- stats_list[[i]][[9,2]] + stats_list[[i]][[11,2]]
+  lower <- stats_list[[i]][[9,2]] - stats_list[[i]][[11,2]]
+  
+  # Populate data frame
+  D_stats[i,] <- c(time, mean, upper, lower)
+  
+  # Row 19 is control
+}
+
+
+# Plot graph of mean D against time, with control
+ggplot(D_stats, aes(x = `Time (min)`, y = `Mean D`)) + geom_point() + 
+  ylim(2,6) + 
+  geom_line() + 
+  geom_errorbar(aes(ymin = `Lower D`, ymax = `Upper D`), alpha = 0.3) + 
+  labs(y = bquote('Mean Diffusion Coefficient' ~ (μm^2/s))) + 
+  theme_classic(base_size = 15) + 
+  geom_hline(yintercept = D_stats[19,2], linetype='dashed', col = 'darkred') +
+  annotate("text", x = 100, y = 3.6, label = "Untreated", col = 'darkred')
+
+
+
+# Save as .png to working directory
+#ggsave("Mean_plot.png", height = 7 , width = 8)
+
+```
+
+## Step 12. Fit linear regression
+
+Gather raw data across all timepoints
+
+```{r warning=FALSE}
+
+# Create new data frame
+D_reg <- setNames(data.frame(matrix(ncol = 3)), c("Time (min)", "Molecule_ID", "D"))
+
+# Function to generate data frame for linear regression
+Lin_reg <- function(timepoints){
+  # Retrieve the data frame
+  df <- get(timepoints)
+  
+  # Get time from dictionary
+  time <- timepoint_dictionary[as.numeric(gsub("\\D", "", timepoints))]
+  
+  # Add new time col to old data frame
+  df$`Time (min)` <- time
+  
+  # Make sure the columns have the same types
+  df$Molecule_ID <- as.character(df$Molecule_ID)
+  df$D <- as.numeric(df$D)
+  
+  # Import cols to new data frame
+  D_reg <- bind_rows(D_reg, df[, c("Time (min)", "Molecule_ID", "D")])
+  
+  # Return to global env
+  assign("D_reg", D_reg, envir = .GlobalEnv)
+} 
+
+# Use purrr::walk to apply the function to each file in the data frame list
+walk(list_timepoint_calc[1:18], Lin_reg)
+
+# Delete first (empty) row
+D_reg <- D_reg[-1, ]
+
+```
+
+Fit a linear model
+
+```{r warning=FALSE}
+
+# Ensure time is numeric class
+D_reg[,1] <- as.numeric(D_reg$`Time (min)`)
+
+# Fit lm
+lm <- lm(D ~ `Time (min)`, data = D_reg)
+
+# Display lm plots
+plot(lm) 
+autoplot(lm)
+
+```
+
+We can see here that the data is fairly linear, but also heteroscedastic and non-normal.
+So, we fit a generalised linear model.
+
+```{r warning=FALSE}
+
+# Fit glm
+glm <- glm(D ~ `Time (min)`, data = D_reg, family = Gamma(link = "inverse"))
+
+# Display plots
+autoplot(glm)
+```
+
+Superimpose the glm on the raw data and mean 
+
+```{r warning=FALSE}
+
+# Superimpose glm on raw points
+ggplot(aes(x = `Time (min)`, y = D), data = D_reg) + geom_point(position = "jitter", alpha = .1, size = .75) + 
+  stat_smooth(method = "glm", formula = y ~ x, method.args = list(family = Gamma(link = "log")), color = "blue") + 
+  ylim(0,15) + 
+  labs(y = bquote('Diffusion Coefficient' ~ (μm^2/s))) +
+  theme_classic(base_size = 15)
+
+
+# Superimpose glm on mean points
+ggplot(D_stats, aes(x = `Time (min)`, y = `Mean D`)) + 
+  geom_point() + 
+  ylim(2,6) + geom_line() + 
+  geom_errorbar(aes(ymin = `Lower D`, ymax = `Upper D`), alpha = 0.3) + 
+  labs(title = '', y = bquote('Mean Diffusion Coefficient' ~ (μm^2/s))) + 
+  theme_classic(base_size = 15) + 
+  stat_smooth(method = "glm", formula = y ~ x, method.args = list(family = Gamma(link = "log")), color = "blue") +
+  geom_hline(yintercept = D_stats[19,2], linetype='dashed', col = 'darkred') +
+  annotate("text", x = 100, y = 3.6, label = "Untreated", col = 'darkred')
+
+
+```
+
+## Step 13. Compare the coefficient distribution of the treated (across time) and untreated population 
+
+```{r warning=FALSE}
+#Determine if the data have a normal distribution with the shapiro-wilk test.
+
+#Test each timepoint calculation. If p is significant it means it is not normal
+
+shapiro_01 <- shapiro.test(timepoint_01_calculations$D)
+shapiro_02 <- shapiro.test(timepoint_02_calculations$D)
+shapiro_03 <- shapiro.test(timepoint_03_calculations$D)
+shapiro_04 <- shapiro.test(timepoint_04_calculations$D)
+shapiro_05 <- shapiro.test(timepoint_05_calculations$D)
+shapiro_06 <- shapiro.test(timepoint_06_calculations$D)
+shapiro_07 <- shapiro.test(timepoint_07_calculations$D)
+shapiro_08 <- shapiro.test(timepoint_08_calculations$D)
+shapiro_09 <- shapiro.test(timepoint_09_calculations$D)
+shapiro_10 <- shapiro.test(timepoint_10_calculations$D)
+shapiro_11 <- shapiro.test(timepoint_11_calculations$D)
+shapiro_12 <- shapiro.test(timepoint_12_calculations$D)
+shapiro_13 <- shapiro.test(timepoint_13_calculations$D)
+shapiro_14 <- shapiro.test(timepoint_14_calculations$D)
+shapiro_15 <- shapiro.test(timepoint_15_calculations$D)
+shapiro_16 <- shapiro.test(timepoint_16_calculations$D)
+shapiro_17 <- shapiro.test(timepoint_17_calculations$D)
+shapiro_18 <- shapiro.test(timepoint_18_calculations$D)
+
+
+#Join all the tests in a single dataframe
+normality_Dcoeff <- list(shapiro_01, shapiro_02,shapiro_03, shapiro_04, shapiro_05, shapiro_06, shapiro_07, shapiro_08, shapiro_09, shapiro_10, shapiro_11, shapiro_12, shapiro_13, shapiro_14, shapiro_15, shapiro_16, shapiro_17, shapiro_18)
+
+
+#print(normality_Dcoeff)
+
+
+#All the results show that the distributions are not normal
+
+#Test for normality the untreated_tracks 
+
+shapiro_control <- shapiro.test(untreated_tracks_calculations$D)
+print(shapiro_control)
+```
+
+
+```{r warning=FALSE}
+#Export the time point calculations as csv and join the D columns in a single file for the Mann Whitney test
+
+
+write.csv(timepoint_01_calculations, 'timepoint_01_calculations.csv', row.names = FALSE)
+write.csv(timepoint_02_calculations, 'timepoint_02_calculations.csv', row.names = FALSE)
+write.csv(timepoint_03_calculations, 'timepoint_03_calculations.csv', row.names = FALSE)
+write.csv(timepoint_04_calculations, 'timepoint_04_calculations.csv', row.names = FALSE)
+write.csv(timepoint_05_calculations, 'timepoint_05_calculations.csv', row.names = FALSE)
+write.csv(timepoint_06_calculations, 'timepoint_06_calculations.csv', row.names = FALSE)
+write.csv(timepoint_07_calculations, 'timepoint_07_calculations.csv', row.names = FALSE)
+write.csv(timepoint_08_calculations, 'timepoint_08_calculations.csv', row.names = FALSE)
+write.csv(timepoint_09_calculations, 'timepoint_09_calculations.csv', row.names = FALSE)
+write.csv(timepoint_10_calculations, 'timepoint_10_calculations.csv', row.names = FALSE)
+write.csv(timepoint_11_calculations, 'timepoint_11_calculations.csv', row.names = FALSE)
+write.csv(timepoint_12_calculations, 'timepoint_12_calculations.csv', row.names = FALSE)
+write.csv(timepoint_13_calculations, 'timepoint_13_calculations.csv', row.names = FALSE)
+write.csv(timepoint_14_calculations, 'timepoint_14_calculations.csv', row.names = FALSE)
+write.csv(timepoint_15_calculations, 'timepoint_15_calculations.csv', row.names = FALSE)
+write.csv(timepoint_16_calculations, 'timepoint_16_calculations.csv', row.names = FALSE)
+write.csv(timepoint_17_calculations, 'timepoint_17_calculations.csv', row.names = FALSE)
+write.csv(timepoint_18_calculations, 'timepoint_18_calculations.csv', row.names = FALSE)
+write.csv(timepoint_10_calculations, 'timepoint_10_calculations.csv', row.names = FALSE)
+write.csv(untreated_tracks_calculations, 'untreated_tracks_calculations.csv', row.names = FALSE)
+
+```
+
+
+
+```{r warning=FALSE}
+
+#Import the csv file that contains only the diffussion coefficients of the timepoints and the untreated population
+
+timepoints_coeff <- read.csv("D_coefficients.csv", header = TRUE)
+
+
+colnames(timepoints_coeff)
+```
+
+
+```{r warning=FALSE}
+#Conduct comparison for non-normal populations using the Mann Whitney test (wilcox.test)
+
+mw_01 <- wilcox.test(timepoints_coeff$timepoint01_D, timepoints_coeff$untreated)
+mw_01
+
+mw_02 <- wilcox.test(timepoints_coeff$timepoint02_D, timepoints_coeff$untreated)
+mw_02
+
+
+mw_03 <- wilcox.test(timepoints_coeff$timepoint03_D, timepoints_coeff$untreated)
+mw_03
+
+
+mw_04 <- wilcox.test(timepoints_coeff$timepoint04_D, timepoints_coeff$untreated)
+mw_04
+
+mw_05 <- wilcox.test(timepoints_coeff$timepoint05_D, timepoints_coeff$untreated)
+mw_05
+
+mw_06 <- wilcox.test(timepoints_coeff$timepoint06_D, timepoints_coeff$untreated)
+mw_06
+
+mw_07 <- wilcox.test(timepoints_coeff$timepoint07_D, timepoints_coeff$untreated)
+mw_07
+
+
+mw_08 <- wilcox.test(timepoints_coeff$timepoint08_D, timepoints_coeff$untreated)
+mw_08
+
+mw_09 <- wilcox.test(timepoints_coeff$timepoint09_D, timepoints_coeff$untreated)
+mw_09
+
+
+mw_10 <- wilcox.test(timepoints_coeff$timepoint10_D, timepoints_coeff$untreated)
+mw_10
+
+mw_11 <- wilcox.test(timepoints_coeff$timepoint11_D, timepoints_coeff$untreated)
+mw_11
+
+
+mw_12 <- wilcox.test(timepoints_coeff$timepoint12_D, timepoints_coeff$untreated)
+mw_12
+
+mw_13 <- wilcox.test(timepoints_coeff$timepoint13_D, timepoints_coeff$untreated)
+mw_13
+
+mw_14 <- wilcox.test(timepoints_coeff$timepoint14_D, timepoints_coeff$untreated)
+mw_14
+
+
+mw_15 <- wilcox.test(timepoints_coeff$timepoint15_D, timepoints_coeff$untreated)
+mw_15
+
+mw_16 <- wilcox.test(timepoints_coeff$timepoint16_D, timepoints_coeff$untreated)
+mw_16
+
+mw_17 <- wilcox.test(timepoints_coeff$timepoint17_D, timepoints_coeff$untreated)
+mw_17
+
+mw_18 <- wilcox.test(timepoints_coeff$timepoint18_D, timepoints_coeff$untreated)
+mw_18
+```
+

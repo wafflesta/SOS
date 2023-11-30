@@ -223,24 +223,81 @@ for (x in 1:length(list_timepoint_calc)){
   time <- timepoint_dictionary[as.numeric(gsub("\\D", "", list_timepoint_calc[x]))]
   
   # Generate histogram title
-  title <- paste("LexA Movement After Antibiotic Treatment, t =", time, "min \n")
+  title <- paste("Distribution of LexA Diffusion, t =", time, "min \n")
   
   #Get data frame
   df <- (get(list_timepoint_calc[x]))
   
   # Plot histogram
-  hist <- ggplot(df, aes(x=D)) + geom_histogram(binwidth = 1, aes(y=..count../sum(..count..))) + 
-    ylim(0,.25) + 
+  hist <- ggplot(df, aes(x=D)) + geom_histogram(binwidth = .4, fill = "darkgrey", aes(y=..count../sum(..count..))) + 
+    ylim(0,.1) + xlim(0,15) +
     labs(x = bquote('Diffusion Coefficient (D)' ~ (μm^2/s)), y = "Proportion", title = title) + 
-    theme_minimal()
+    theme_classic(base_size = 15) + theme(plot.title = element_text(hjust = 0.5))
   
   # Store histogram in list_hist
   list_hist[[length(list_hist) + 1]] <- hist
+  
+  # Save all histograms as .png to working directory
+  file_name <- paste("Distribution", time, "min.png")
+  ggsave(file_name, height = 7, width = 8)
 }
 
 # Show all plots
 for (plot in list_hist) {
   print(plot)
 }
+
+```
+
+Step 10. Obtain the descriptive stats of all the timepoints
+
+```{r}
+
+library(pastecs)
+
+list_df_calculations <- list(timepoint_01_calculations,timepoint_02_calculations,timepoint_03_calculations, timepoint_04_calculations, timepoint_05_calculations, timepoint_06_calculations, timepoint_07_calculations, timepoint_08_calculations, timepoint_09_calculations, timepoint_10_calculations, timepoint_11_calculations, timepoint_12_calculations, timepoint_13_calculations, timepoint_14_calculations, timepoint_15_calculations, timepoint_16_calculations, timepoint_17_calculations, timepoint_18_calculations)
+
+# Function to calculate descriptive statistics for each data frame
+calculate_stats <- function(df) {
+  return(stat.desc(df[,2:3]))
+}
+ 
+# Use purrr::map to apply the function to each data frame in the list
+stats_list <- purrr::map(list_df_calculations, calculate_stats)
+
+# Print the results
+print(stats_list)
+
+View(stats_list)
+
+```
+
+Step 11. Plot mean D against time
+
+```{r}
+# Create data frame of mean and CI of D
+D_stats <- setNames(data.frame(matrix(ncol = 4, nrow = 18)), c("Time (min)", "Mean D", "Upper D", "Lower D"))
+
+# Loop through stats_list and populate D_stats 
+for (i in 1:18){
+  # Get time from dictionary
+  time <- as.numeric(timepoint_dictionary[i])
+  
+  # Get mean value of D
+  mean <- stats_list[[i]][[9,2]]
+
+  # Get CI of D
+  upper <- stats_list[[i]][[9,2]] + stats_list[[i]][[11,2]]
+  lower <- stats_list[[i]][[9,2]] - stats_list[[i]][[11,2]]
+  
+  # Populate data frame
+  D_stats[i,] <- c(time, mean, upper, lower)
+}
+
+# Plot graph
+ggplot(D_stats, aes(x = `Time (min)`, y = `Mean D`)) + geom_point() + ylim(2,6) + geom_line() + geom_errorbar(aes(ymin = `Lower D`, ymax = `Upper D`), alpha = 0.3) + labs(title = '', y = bquote('Mean Diffusion Coefficient' ~ (μm^2/s))) + theme_classic(base_size = 15)
+
+# Save as .png to working directory
+ggsave("Mean_plot.png", height = 7 , width = 8)
 
 ```

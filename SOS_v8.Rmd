@@ -279,7 +279,7 @@ Step 11. Plot mean D against time
 D_stats <- setNames(data.frame(matrix(ncol = 4, nrow = 18)), c("Time (min)", "Mean D", "Upper D", "Lower D"))
 
 # Loop through stats_list and populate D_stats 
-for (i in 1:18){
+for (i in 1:length(stats_list)){
   # Get time from dictionary
   time <- as.numeric(timepoint_dictionary[i])
   
@@ -292,12 +292,114 @@ for (i in 1:18){
   
   # Populate data frame
   D_stats[i,] <- c(time, mean, upper, lower)
+  
+  # Row 19 is control
 }
 
-# Plot graph
-ggplot(D_stats, aes(x = `Time (min)`, y = `Mean D`)) + geom_point() + ylim(2,6) + geom_line() + geom_errorbar(aes(ymin = `Lower D`, ymax = `Upper D`), alpha = 0.3) + labs(title = '', y = bquote('Mean Diffusion Coefficient' ~ (μm^2/s))) + theme_classic(base_size = 15)
+
+# Plot graph of mean D against time, with control
+ggplot(D_stats, aes(x = `Time (min)`, y = `Mean D`)) + geom_point() + 
+  ylim(2,6) + 
+  geom_line() + 
+  geom_errorbar(aes(ymin = `Lower D`, ymax = `Upper D`), alpha = 0.3) + 
+  labs(y = bquote('Mean Diffusion Coefficient' ~ (μm^2/s))) + 
+  theme_classic(base_size = 15) + 
+  geom_hline(yintercept = D_stats[19,2], linetype='dashed', col = 'darkred') +
+  annotate("text", x = 100, y = 3.6, label = "Untreated", col = 'darkred')
+
+
 
 # Save as .png to working directory
-ggsave("Mean_plot.png", height = 7 , width = 8)
+#ggsave("Mean_plot.png", height = 7 , width = 8)
+
+```
+Step 11. Fit linear regression
+
+Gather raw data across all timepoints
+
+```{r}
+
+# Create new data frame
+D_reg <- setNames(data.frame(matrix(ncol = 3)), c("Time (min)", "Molecule_ID", "D"))
+
+# Function to generate data frame for linear regression
+Lin_reg <- function(timepoints){
+  # Retrieve the data frame
+  df <- get(timepoints)
+  
+  # Get time from dictionary
+  time <- timepoint_dictionary[as.numeric(gsub("\\D", "", timepoints))]
+  
+  # Add new time col to old data frame
+  df$`Time (min)` <- time
+  
+  # Make sure the columns have the same types
+  df$Molecule_ID <- as.character(df$Molecule_ID)
+  df$D <- as.numeric(df$D)
+  
+  # Import cols to new data frame
+  D_reg <- bind_rows(D_reg, df[, c("Time (min)", "Molecule_ID", "D")])
+  
+  # Return to global env
+  assign("D_reg", D_reg, envir = .GlobalEnv)
+} 
+
+# Use purrr::walk to apply the function to each file in the data frame list
+walk(list_timepoint_calc[1:18], Lin_reg)
+
+# Delete first (empty) row
+D_reg <- D_reg[-1, ]
+
+```
+
+Fit a linear model
+```{r}
+
+# Ensure time is numeric class
+D_reg[,1] <- as.numeric(D_reg$`Time (min)`)
+
+# Fit lm
+lm <- lm(D ~ `Time (min)`, data = D_reg)
+
+# Display lm plots
+plot(lm) 
+autoplot(lm)
+
+```
+We can see here that the data is fairly linear, but also heteroscedastic and non-normal.
+So, we fit a generalised linear model.
+
+```{r}
+
+# Fit glm
+glm <- glm(D ~ `Time (min)`, data = D_reg, family = Gamma(link = "inverse"))
+
+# Display plots
+autoplot(glm)
+```
+
+Superimpose the glm on the raw data and mean 
+
+```{r}
+
+# Superimpose glm on raw points
+ggplot(aes(x = `Time (min)`, y = D), data = D_reg) + geom_point(position = "jitter", alpha = .1, size = .75) + 
+  stat_smooth(method = "glm", formula = y ~ x, method.args = list(family = Gamma(link = "log")), color = "blue") + 
+  ylim(0,15) + 
+  labs(y = bquote('Diffusion Coefficient' ~ (μm^2/s))) +
+  theme_classic(base_size = 15)
+
+
+# Superimpose glm on mean points
+ggplot(D_stats, aes(x = `Time (min)`, y = `Mean D`)) + 
+  geom_point() + 
+  ylim(2,6) + geom_line() + 
+  geom_errorbar(aes(ymin = `Lower D`, ymax = `Upper D`), alpha = 0.3) + 
+  labs(title = '', y = bquote('Mean Diffusion Coefficient' ~ (μm^2/s))) + 
+  theme_classic(base_size = 15) + 
+  stat_smooth(method = "glm", formula = y ~ x, method.args = list(family = Gamma(link = "log")), color = "blue") +
+  geom_hline(yintercept = D_stats[19,2], linetype='dashed', col = 'darkred') +
+  annotate("text", x = 100, y = 3.6, label = "Untreated", col = 'darkred')
+
 
 ```
